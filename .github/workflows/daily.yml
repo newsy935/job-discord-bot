@@ -16,17 +16,12 @@ jobs:
 
     steps:
       - name: 코드 받기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Node.js 설정
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
       - name: Python 설정
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: '3.11'
 
