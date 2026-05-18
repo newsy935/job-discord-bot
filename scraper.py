@@ -13,11 +13,10 @@ WANTED_HEADERS = {
     "wanted-user-language": "ko",
 }
 
-JUMPIT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Origin": "https://jumpit.saramin.co.kr",
-    "Referer": "https://jumpit.saramin.co.kr/",
+SARAMIN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://www.saramin.co.kr/",
 }
 
 JOBKOREA_HEADERS = {
@@ -27,9 +26,10 @@ JOBKOREA_HEADERS = {
 
 WANTED_JOB_GROUPS = [("70", "디자인")]
 
-JUMPIT_CATEGORIES = [
-    (15, "UI/UX 디자이너"),
-    (16, "그래픽/BX 디자이너"),
+SARAMIN_KEYWORDS = [
+    "UX디자이너",
+    "UI디자이너",
+    "프로덕트디자이너",
 ]
 
 JOBKOREA_KEYWORDS = [
@@ -147,47 +147,56 @@ def fetch_wanted():
     return jobs
 
 
-def fetch_jumpit():
+def fetch_saramin():
     jobs = []
-    for cat_id, label in JUMPIT_CATEGORIES:
+    seen = set()
+    for keyword in SARAMIN_KEYWORDS:
         try:
             resp = requests.get(
-                "https://api.jumpit.co.kr/api/positions",
-                headers=JUMPIT_HEADERS,
-                params={"sort": "rsp_rate", "jobCategory": cat_id, "page": 1},
+                "https://www.saramin.co.kr/zf_user/search/recruit",
+                headers=SARAMIN_HEADERS,
+                params={
+                    "searchType": "search",
+                    "searchword": keyword,
+                    "loc_mcd": "101000",  # 서울
+                    "exp_cd": "1",        # 경력직
+                },
                 timeout=10,
             )
             resp.raise_for_status()
-            result = resp.json().get("result", {})
-            for job in result.get("positions", []):
-                title = job.get("title", "")
-                company = job.get("companyName", "")
-                position_id = job.get("id")
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for item in soup.select(".item_recruit")[:10]:
+                title_el = item.select_one(".job_tit a")
+                company_el = item.select_one(".corp_name a")
+                if not (title_el and company_el):
+                    continue
 
-                # 경력 필터
+                title = title_el.get_text(strip=True)
+                company = company_el.get_text(strip=True)
+                href = title_el.get("href", "")
+                if href and not href.startswith("http"):
+                    href = "https://www.saramin.co.kr" + href
+
                 if not is_experience_match(title):
                     continue
 
-                # 위치 정보 (점핏은 리스트에 위치 미포함 → 서울 필터 완화)
-                locations = job.get("locations", [])
-                location_str = ", ".join(locations) if locations else ""
-                if location_str and not is_seoul(location_str):
-                    continue
+                item_text = item.get_text()
+                flex = has_flex(item_text)
+                inhouse = is_inhouse(title + " " + item_text)
 
-                tags = " ".join(job.get("techStacks", []) + job.get("serviceTags", []))
-                flex = has_flex(tags + " " + title)
-                inhouse = is_inhouse(title + " " + tags)
-
-                jobs.append({
-                    "company": company,
-                    "position": title,
-                    "location": location_str,
-                    "link": f"https://jumpit.saramin.co.kr/position/{position_id}",
-                    "flex": flex,
-                    "inhouse": inhouse,
-                })
+                key = (company, title)
+                if key not in seen:
+                    seen.add(key)
+                    jobs.append({
+                        "company": company,
+                        "position": title,
+                        "location": "서울",
+                        "link": href,
+                        "flex": flex,
+                        "inhouse": inhouse,
+                    })
         except Exception as e:
-            print(f"[점핏 오류] {e}")
+            print(f"[사람인 오류] {e}")
     return jobs
 
 
@@ -258,13 +267,13 @@ def format_job_line(job):
     return line
 
 
-def send_to_discord(wanted, jumpit, jobkorea):
+def send_to_discord(wanted, saramin, jobkorea):
     if not DISCORD_WEBHOOK_URL:
         print("DISCORD_WEBHOOK_URL 환경변수가 없습니다.")
         return
 
     today = datetime.now().strftime("%Y년 %m월 %d일")
-    total = len(wanted) + len(jumpit) + len(jobkorea)
+    total = len(wanted) + len(saramin) + len(jobkorea)
     sections = []
 
     filter_summary = "📍서울 · 💼경력 2.5년+ · 🏢인하우스/스타트업 우선"
@@ -273,9 +282,9 @@ def send_to_discord(wanted, jumpit, jobkorea):
         lines = "\n".join(format_job_line(j) for j in wanted[:10])
         sections.append(f"🔵 **원티드** ({len(wanted)}개)\n{lines}")
 
-    if jumpit:
-        lines = "\n".join(format_job_line(j) for j in jumpit[:10])
-        sections.append(f"🟢 **점핏** ({len(jumpit)}개)\n{lines}")
+    if saramin:
+        lines = "\n".join(format_job_line(j) for j in saramin[:10])
+        sections.append(f"🟢 **사람인** ({len(saramin)}개)\n{lines}")
 
     if jobkorea:
         lines = "\n".join(format_job_line(j) for j in jobkorea[:10])
@@ -310,11 +319,11 @@ if __name__ == "__main__":
     wanted = fetch_wanted()
     print(f"원티드: {len(wanted)}개")
 
-    jumpit = fetch_jumpit()
-    print(f"점핏: {len(jumpit)}개")
+    saramin = fetch_saramin()
+    print(f"사람인: {len(saramin)}개")
 
     jobkorea = fetch_jobkorea()
     print(f"잡코리아: {len(jobkorea)}개")
 
-    send_to_discord(wanted, jumpit, jobkorea)
+    send_to_discord(wanted, saramin, jobkorea)
     print("완료!")
