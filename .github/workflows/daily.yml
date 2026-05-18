@@ -1,0 +1,27 @@
+name: Daily Job Scraper
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 매일 UTC 00:00 = KST 09:00
+  workflow_dispatch:     # 수동으로 직접 실행 가능
+
+jobs:
+  scrape-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 받기
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 공고 수집 및 Discord 전송
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python scraper.py
