@@ -54,8 +54,15 @@ JOBKOREA_KEYWORDS = [
 ]
 
 # ── 필터 설정 ──────────────────────────────────────────
-# 신입/인턴 등 경력 미달 공고 제외 키워드
-EXCLUDE_EXPERIENCE = ["신입", "인턴", "0년", "1년 이하", "주니어 0"]
+# 경력 미달 (너무 낮음) 제외 키워드
+EXCLUDE_TOO_JUNIOR = ["신입", "인턴", "0년", "1년 이하"]
+
+# 경력 초과 (너무 높음) 제외 키워드
+EXCLUDE_TOO_SENIOR = [
+    "5년 이상", "6년 이상", "7년 이상", "8년 이상", "9년 이상", "10년 이상",
+    "5년↑", "6년↑", "7년↑",
+    "시니어", "senior", "리드", "lead", "헤드", "head", "디렉터", "director",
+]
 
 # 서울 지역이 아닌 경우 제외 (위치 정보가 없으면 일단 포함)
 def is_seoul(location: str) -> bool:
@@ -63,11 +70,14 @@ def is_seoul(location: str) -> bool:
         return True
     return "서울" in location
 
-# 공고 제목·태그에서 경력 조건 체크 (신입 전용은 제외)
+# 경력 2~4년 범위 필터 (너무 낮거나 너무 높으면 제외)
 def is_experience_match(text: str) -> bool:
-    text_lower = text.lower()
-    for kw in EXCLUDE_EXPERIENCE:
+    for kw in EXCLUDE_TOO_JUNIOR:
         if kw in text:
+            return False
+    text_lower = text.lower()
+    for kw in EXCLUDE_TOO_SENIOR:
+        if kw.lower() in text_lower:
             return False
     return True
 
