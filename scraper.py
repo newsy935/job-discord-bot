@@ -1,7 +1,22 @@
 import requests
 import os
+import json
 from datetime import datetime
 from bs4 import BeautifulSoup
+
+SEEN_JOBS_FILE = "seen_jobs.json"
+
+def load_seen_jobs() -> set:
+    if os.path.exists(SEEN_JOBS_FILE):
+        with open(SEEN_JOBS_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
+
+def save_seen_jobs(seen: set):
+    # 최근 500개만 유지 (파일 무한 증가 방지)
+    items = list(seen)[-500:]
+    with open(SEEN_JOBS_FILE, "w") as f:
+        json.dump(items, f)
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
@@ -316,14 +331,30 @@ def send_to_discord(wanted, saramin, jobkorea):
 if __name__ == "__main__":
     print("공고 수집 시작...")
 
+    seen = load_seen_jobs()
+    print(f"기존 확인된 공고: {len(seen)}개")
+
     wanted = fetch_wanted()
-    print(f"원티드: {len(wanted)}개")
-
     saramin = fetch_saramin()
-    print(f"사람인: {len(saramin)}개")
-
     jobkorea = fetch_jobkorea()
-    print(f"잡코리아: {len(jobkorea)}개")
 
-    send_to_discord(wanted, saramin, jobkorea)
+    # 새 공고만 필터링
+    def filter_new(jobs):
+        new = [j for j in jobs if j["link"] not in seen]
+        return new
+
+    new_wanted = filter_new(wanted)
+    new_saramin = filter_new(saramin)
+    new_jobkorea = filter_new(jobkorea)
+
+    print(f"원티드: 전체 {len(wanted)}개 → 신규 {len(new_wanted)}개")
+    print(f"사람인: 전체 {len(saramin)}개 → 신규 {len(new_saramin)}개")
+    print(f"잡코리아: 전체 {len(jobkorea)}개 → 신규 {len(new_jobkorea)}개")
+
+    send_to_discord(new_wanted, new_saramin, new_jobkorea)
+
+    # seen 목록 업데이트
+    for j in wanted + saramin + jobkorea:
+        seen.add(j["link"])
+    save_seen_jobs(seen)
     print("완료!")
