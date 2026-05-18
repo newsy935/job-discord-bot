@@ -1,6 +1,7 @@
 import requests
 import os
 import json
+import re
 from datetime import datetime
 from bs4 import BeautifulSoup
 
@@ -54,31 +55,42 @@ JOBKOREA_KEYWORDS = [
 ]
 
 # ── 필터 설정 ──────────────────────────────────────────
-# 경력 미달 (너무 낮음) 제외 키워드
-EXCLUDE_TOO_JUNIOR = ["신입", "인턴", "0년", "1년 이하"]
-
-# 경력 초과 (너무 높음) 제외 키워드
-EXCLUDE_TOO_SENIOR = [
-    "5년 이상", "6년 이상", "7년 이상", "8년 이상", "9년 이상", "10년 이상",
-    "5년↑", "6년↑", "7년↑",
-    "시니어", "senior", "리드", "lead", "헤드", "head", "디렉터", "director",
-]
-
 # 서울 지역이 아닌 경우 제외 (위치 정보가 없으면 일단 포함)
 def is_seoul(location: str) -> bool:
     if not location:
         return True
     return "서울" in location
 
-# 경력 2~4년 범위 필터 (너무 낮거나 너무 높으면 제외)
+# 경력 2~4년 범위 필터
 def is_experience_match(text: str) -> bool:
-    for kw in EXCLUDE_TOO_JUNIOR:
-        if kw in text:
+    t = text.lower()
+
+    # 신입 전용 제외
+    if re.search(r'신입\s*전용|신입\s*모집|신입\s*채용|인턴', t):
+        return False
+    # "신입/경력"은 허용, 순수 신입만 제외
+    if "신입" in t and "경력" not in t:
+        return False
+
+    # 시니어/리드/디렉터 직책 제외
+    if re.search(r'시니어|senior|리드\s*디자|lead\s*design|헤드|head\s*of|디렉터|director', t):
+        return False
+
+    # "X년 이상" 패턴 추출 → X가 5 이상이면 제외
+    for m in re.finditer(r'(\d+)\s*년\s*이상', t):
+        if int(m.group(1)) >= 5:
             return False
-    text_lower = text.lower()
-    for kw in EXCLUDE_TOO_SENIOR:
-        if kw.lower() in text_lower:
+
+    # "경력 X년" or "경력X년" 패턴 → X가 5 이상이면 제외
+    for m in re.finditer(r'경력\s*(\d+)\s*년', t):
+        if int(m.group(1)) >= 5:
             return False
+
+    # "X-Y년" or "X~Y년" 범위 → 최솟값이 5 이상이면 제외
+    for m in re.finditer(r'(\d+)\s*[-~]\s*(\d+)\s*년', t):
+        if int(m.group(1)) >= 5:
+            return False
+
     return True
 
 # 자유출근제 또는 인하우스 관련 키워드 (공고 상세에서 확인)
@@ -134,10 +146,6 @@ def fetch_wanted():
                 if not any(k in position for k in ["UX", "UI", "프로덕트", "Product", "서비스"]):
                     continue
 
-                # 경력 필터
-                if not is_experience_match(position):
-                    continue
-
                 location = job.get("address", {}).get("location", "")
 
                 # 서울 필터
@@ -147,14 +155,19 @@ def fetch_wanted():
                 company = job.get("company", {}).get("name", "")
                 job_id = job.get("id")
 
-                # 상세 페이지에서 자유출근제·인하우스 확인
+                # 상세 페이지에서 경력·자유출근제·인하우스 확인
                 detail = fetch_wanted_detail(job_id)
                 detail_text = " ".join([
                     detail.get("detail", {}).get("intro", ""),
                     detail.get("detail", {}).get("main_tasks", ""),
+                    detail.get("detail", {}).get("requirements", ""),
                     detail.get("detail", {}).get("benefits", ""),
                     " ".join(t.get("title", "") for t in detail.get("tags", [])),
                 ])
+
+                # 경력 필터 (제목 + 상세 전체 텍스트)
+                if not is_experience_match(position + " " + detail_text):
+                    continue
 
                 flex = has_flex(detail_text)
                 inhouse = is_inhouse(position + " " + detail_text)
@@ -202,10 +215,11 @@ def fetch_saramin():
                 if href and not href.startswith("http"):
                     href = "https://www.saramin.co.kr" + href
 
-                if not is_experience_match(title):
+                item_text = item.get_text()
+
+                if not is_experience_match(title + " " + item_text):
                     continue
 
-                item_text = item.get_text()
                 flex = has_flex(item_text)
                 inhouse = is_inhouse(title + " " + item_text)
 
@@ -251,11 +265,12 @@ def fetch_jobkorea():
                 if href and not href.startswith("http"):
                     href = "https://www.jobkorea.co.kr" + href
 
-                # 경력 필터
-                if not is_experience_match(title):
+                item_text = item.get_text()
+
+                # 경력 필터 (제목 + 리스트 전체 텍스트)
+                if not is_experience_match(title + " " + item_text):
                     continue
 
-                item_text = item.get_text()
                 flex = has_flex(item_text)
                 inhouse = is_inhouse(title + " " + item_text)
 
